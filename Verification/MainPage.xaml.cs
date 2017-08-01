@@ -1,21 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.ValueGeneration;
+using System;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Controls.Primitives;
-using Windows.UI.Xaml.Data;
-using Windows.UI.Xaml.Input;
-using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
-
-// The Blank Page item template is documented at https://go.microsoft.com/fwlink/?LinkId=402352&clcid=0x409
 
 namespace Verification
 {
@@ -29,9 +19,9 @@ namespace Verification
             InitializeComponent();
         }
 
-        private void RunTests_Click(object sender, RoutedEventArgs e)
+        protected override void OnNavigatedTo(NavigationEventArgs e)
         {
-            RunTestsButton.IsEnabled = false;
+            base.OnNavigatedTo(e);
             OutputTextBlock.Text = "";
             Task.Run(RunTests);
         }
@@ -40,32 +30,31 @@ namespace Verification
         {
             await WriteLine("Running tests...");
 
+            var succeededCount = 0;
+            var failedCount = 0;
             var testContainer = new Tests(WriteLine);
 
             foreach (var testMethod in testContainer.GetType().GetTypeInfo().GetRuntimeMethods()
-                .Where(m => m.ReturnType == typeof(Task)))
+                .Where(m => m.ReturnType == typeof(Task) && m.IsPublic))
             {
                 try
                 {
                     await (Task)testMethod.Invoke(testContainer, new object[0]);
+                    succeededCount++;
                 }
                 catch (Exception ex)
                 {
                     await WriteLine($"Test {testMethod.Name} failed:");
                     await WriteLine(ex.ToString());
                     await WriteLine("");
+                    failedCount++;
                 }
             }
 
-            await WriteLine("Done");
-
-            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,
-                () => { RunTestsButton.IsEnabled = true; }).AsTask();
+            await WriteLine($"Succeeded: {succeededCount}. Failed: {failedCount}");
         }
 
         private Task WriteLine(string text)
-        {
-            return Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () => { OutputTextBlock.Text += text + Environment.NewLine; }).AsTask();
-        }
+            => Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () => { OutputTextBlock.Text += text + Environment.NewLine; }).AsTask();
     }
 }

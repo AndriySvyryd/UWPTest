@@ -74,6 +74,83 @@ namespace Verification
             }
         }
 
+        public async Task NullableEnum()
+        {
+            using (var context = new VerificationApplicationContext())
+            {
+                await context.Database.EnsureDeletedAsync();
+                await context.Database.EnsureCreatedAsync();
+
+                var blog = context.CreateBlog();
+                blog.Name = "Hello World!";
+
+                context.CreatePost(blog).Type = PostType.New;
+                context.CreatePost(blog).Type = PostType.Reply;
+                context.CreatePost(blog);
+
+                await context.SaveChangesAsync();
+            }
+
+            using (var context = new VerificationApplicationContext())
+            {
+                var results = (from blog in context.Blogs
+                               join post in context.Posts on blog.Id equals post.BlogId
+                               where post.Type == PostType.New
+                               select blog).ToArray();
+                Assert.Equal(1, results.Length);
+            }
+        }
+
+        public async Task NavigationQuery()
+        {
+            using (var context = new VerificationApplicationContext())
+            {
+                await context.Database.EnsureDeletedAsync();
+                await context.Database.EnsureCreatedAsync();
+
+                var blog = context.CreateBlog();
+                blog.Name = "Hello World!";
+                
+                context.CreatePost(blog);
+
+                await context.SaveChangesAsync();
+            }
+
+            using (var context = new VerificationApplicationContext())
+            {
+                var result = context.Posts.Count(p => p.Blog.Tenant.Name == null);
+                Assert.Equal(1, result);
+            }
+        }
+        
+        public async Task FromSql()
+        {
+            using (var context = new VerificationApplicationContext())
+            {
+                await context.Database.EnsureDeletedAsync();
+                await context.Database.EnsureCreatedAsync();
+
+                var blog = context.CreateBlog();
+                blog.Name = "Hello World!";
+
+                context.CreatePost(blog);
+
+                await context.SaveChangesAsync();
+            }
+
+            using (var context = new VerificationApplicationContext())
+            {
+                if (context.Database.IsSqlite())
+                {
+                    var results = await context.Blogs
+                        .FromSql(@"SELECT * FROM ""Blogs""")
+                        .ToArrayAsync();
+
+                    Assert.Equal(1, results.Length);
+                }
+            }
+        }
+
         protected class VerificationApplicationContext : DbContext
         {
             public DbSet<Blog> Blogs { get; set; }
@@ -94,9 +171,13 @@ namespace Verification
             {
                 base.OnConfiguring(optionsBuilder);
 
-                optionsBuilder.UseSqlite("Data Source=Verification.db")
+                optionsBuilder
+                    //.UseInMemoryDatabase("Verification")
+                    .UseSqlite("Data Source=Verification.db")
                     .EnableSensitiveDataLogging()
-                    .ConfigureWarnings(w => w.Default(WarningBehavior.Throw).Ignore(CoreEventId.SensitiveDataLoggingEnabledWarning));
+                    .ConfigureWarnings(w => w.Default(WarningBehavior.Throw)
+                    .Ignore(CoreEventId.SensitiveDataLoggingEnabledWarning)
+                    .Ignore(RelationalEventId.QueryClientEvaluationWarning));
             }
 
             protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -143,16 +224,20 @@ namespace Verification
         protected class Post
         {
             public string TenantId { get; set; }
-            public int BlogId { get; set; }
+            public int? BlogId { get; set; }
             public int Id { get; set; }
             public string Title { get; set; }
+            public PostType? Type { get; set; }
             public Blog Blog { get; set; }
             public Tenant Tenant { get; set; }
         }
 
+        public enum PostType { New, Reply };
+
         protected class Tenant
         {
             public string Id { get; set; }
+            public string Name { get; set; }
         }
     }
 }
