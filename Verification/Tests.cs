@@ -43,7 +43,7 @@ namespace Verification
                 var query = EF.CompileQuery((VerificationApplicationContext c, string t)
                     => c.Set<Post>().Include(p => p.Blog).Where(p => p.TenantId == t));
                 Assert.Equal(2, context.Blogs.Count());
-                Assert.Equal(0, context.Set<Blog>().Local.Count());
+                Assert.Empty(context.Set<Blog>().Local);
                 var posts = query(context, "1").ToList();
                 Assert.Equal(2, posts.Count());
                 Assert.Equal(2, context.Set<Post>().Local.Count());
@@ -97,7 +97,7 @@ namespace Verification
                                join post in context.Posts on blog.Id equals post.BlogId
                                where post.Type == PostType.New
                                select blog).ToArray();
-                Assert.Equal(1, results.Length);
+                Assert.Single(results);
             }
         }
 
@@ -118,11 +118,48 @@ namespace Verification
 
             using (var context = new VerificationApplicationContext())
             {
-                var result = context.Posts.Count(p => p.Blog.Tenant.Name == null);
+                var result = context.Posts.Count(p => p.Blog.Tenant.Name == "First");
                 Assert.Equal(1, result);
             }
         }
-        
+
+        public async Task DefaultIfEmpty()
+        {
+            using (var context = new VerificationApplicationContext())
+            {
+                await context.Database.EnsureDeletedAsync();
+                await context.Database.EnsureCreatedAsync();
+
+                var blog = context.CreateBlog();
+                blog.Name = "Hello World!";
+
+                context.CreatePost(blog);
+
+                var anotherTenant = context.Tenants.Add(new Tenant { Id = "2", Name = "Second" });
+                var anotherPost = context.Posts.Add(new Post { Title = "Second post", Tenant = anotherTenant.Entity, Type = PostType.New });
+
+                await context.SaveChangesAsync();
+            }
+
+            PostType? type = PostType.New;
+            var tenantId = "2";
+            using (var context = new VerificationApplicationContext())
+            {
+                var result = await (
+                    from post in context.Posts.Include(i => i.Tenant)
+                    from blog in context.Blogs
+                        .Where(b => b.TenantId == post.TenantId)
+                        .DefaultIfEmpty()
+                    where post.TenantId == tenantId && (type == null || post.Type == type.GetValueOrDefault())
+                    select new { post, blog }
+                ).ToArrayAsync();
+
+                Assert.Single(result);
+                Assert.Equal("Second post", result[0].post.Title);
+                Assert.Null(result[0].blog);
+            }
+        }
+
         public async Task FromSql()
         {
             using (var context = new VerificationApplicationContext())
@@ -146,7 +183,7 @@ namespace Verification
                         .FromSql(@"SELECT * FROM ""Blogs""")
                         .ToArrayAsync();
 
-                    Assert.Equal(1, results.Length);
+                    Assert.Single(results);
                 }
             }
         }
@@ -173,7 +210,8 @@ namespace Verification
 
                 optionsBuilder
                     //.UseInMemoryDatabase("Verification")
-                    .UseSqlite("Data Source=Verification.db")
+                    //.UseSqlite("Data Source=Verification.db")
+                    .UseSqlServer("Data Source=.;Database=Verification;User Id=user;Password=password; Connect Timeout=60;ConnectRetryCount=0")
                     .EnableSensitiveDataLogging()
                     .ConfigureWarnings(w => w.Default(WarningBehavior.Throw)
                     .Ignore(CoreEventId.SensitiveDataLoggingEnabledWarning)
@@ -197,7 +235,7 @@ namespace Verification
                 var currentTenant = Tenants.Find("1");
                 if (currentTenant == null)
                 {
-                    Tenants.Add(new Tenant { Id = "1" });
+                    Tenants.Add(new Tenant { Id = "1", Name = "First" });
                 }
                 var blog = new Blog { TenantId = "1" };
                 Blogs.Add(blog);
